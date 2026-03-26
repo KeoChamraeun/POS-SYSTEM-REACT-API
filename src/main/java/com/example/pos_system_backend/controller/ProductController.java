@@ -39,6 +39,7 @@ public class ProductController extends BaseController {
         map.put("stockQty", p.getStockQty() != null ? p.getStockQty() : BigDecimal.ZERO);
         map.put("minStock", p.getMinStock() != null ? p.getMinStock() : BigDecimal.ZERO);
         map.put("isActive", p.getIsActive() != null ? p.getIsActive() : true);
+        map.put("imageUrl", p.getImageUrl() != null ? p.getImageUrl() : ""); // ← ADDED
         try {
             if (p.getCategory() != null)
                 map.put("category", Map.of("id", p.getCategory().getId(), "name", p.getCategory().getName()));
