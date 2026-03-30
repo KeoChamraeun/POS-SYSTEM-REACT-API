@@ -1,11 +1,11 @@
 package com.example.pos_system_backend.controller;
 
-import com.example.pos_system_backend.model.Product;
-import com.example.pos_system_backend.repository.BranchRepository;
-import com.example.pos_system_backend.repository.UserRepository;
+import com.example.pos_system_backend.model.*;
+import com.example.pos_system_backend.repository.*;
 import com.example.pos_system_backend.security.JwtUtils;
 import com.example.pos_system_backend.service.ProductService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.util.*;
@@ -17,13 +17,18 @@ public class ProductController extends BaseController {
 
     private final ProductService productService;
     private final BranchRepository branchRepository;
+    private final CategoryRepository categoryRepository;
+    private final BrandRepository brandRepository;
     private final JwtUtils jwtUtils;
     private final UserRepository userRepository;
 
     public ProductController(ProductService productService, BranchRepository branchRepository,
+            CategoryRepository categoryRepository, BrandRepository brandRepository,
             JwtUtils jwtUtils, UserRepository userRepository) {
         this.productService = productService;
         this.branchRepository = branchRepository;
+        this.categoryRepository = categoryRepository;
+        this.brandRepository = brandRepository;
         this.jwtUtils = jwtUtils;
         this.userRepository = userRepository;
     }
@@ -39,27 +44,16 @@ public class ProductController extends BaseController {
         map.put("stockQty", p.getStockQty() != null ? p.getStockQty() : BigDecimal.ZERO);
         map.put("minStock", p.getMinStock() != null ? p.getMinStock() : BigDecimal.ZERO);
         map.put("isActive", p.getIsActive() != null ? p.getIsActive() : true);
-        map.put("imageUrl", p.getImageUrl() != null ? p.getImageUrl() : ""); // ← ADDED
-        try {
-            if (p.getCategory() != null)
-                map.put("category", Map.of("id", p.getCategory().getId(), "name", p.getCategory().getName()));
-        } catch (Exception ignored) {}
-        try {
-            if (p.getBrand() != null)
-                map.put("brand", Map.of("id", p.getBrand().getId(), "name", p.getBrand().getName()));
-        } catch (Exception ignored) {}
-        try {
-            if (p.getUnit() != null)
-                map.put("unit", Map.of("id", p.getUnit().getId(), "name", p.getUnit().getName()));
-        } catch (Exception ignored) {}
-        try {
-            if (p.getBranch() != null)
-                map.put("branch", Map.of("id", p.getBranch().getId(), "name", p.getBranch().getName()));
-        } catch (Exception ignored) {}
+        map.put("imageUrl", p.getImageUrl() != null ? p.getImageUrl() : "");
+        try { if (p.getCategory() != null) map.put("category", Map.of("id", p.getCategory().getId(), "name", p.getCategory().getName())); } catch (Exception ignored) {}
+        try { if (p.getBrand() != null) map.put("brand", Map.of("id", p.getBrand().getId(), "name", p.getBrand().getName())); } catch (Exception ignored) {}
+        try { if (p.getUnit() != null) map.put("unit", Map.of("id", p.getUnit().getId(), "name", p.getUnit().getName())); } catch (Exception ignored) {}
+        try { if (p.getBranch() != null) map.put("branch", Map.of("id", p.getBranch().getId(), "name", p.getBranch().getName())); } catch (Exception ignored) {}
         return map;
     }
 
     @GetMapping
+    @Transactional(readOnly = true)
     public ResponseEntity<?> getAll(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
@@ -78,15 +72,14 @@ public class ProductController extends BaseController {
     }
 
     @GetMapping("/{id}")
+    @Transactional(readOnly = true)
     public ResponseEntity<?> getById(@PathVariable Long id) {
-        try {
-            return ResponseEntity.ok(toMap(productService.getById(id)));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
+        try { return ResponseEntity.ok(toMap(productService.getById(id))); }
+        catch (Exception e) { return ResponseEntity.status(500).body(Map.of("error", e.getMessage())); }
     }
 
     @GetMapping("/search")
+    @Transactional(readOnly = true)
     public ResponseEntity<?> search(
             @RequestParam String q,
             @RequestHeader(value = "Authorization", required = false) String auth,
@@ -105,6 +98,7 @@ public class ProductController extends BaseController {
     }
 
     @GetMapping("/low-stock")
+    @Transactional(readOnly = true)
     public ResponseEntity<?> lowStock(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
@@ -122,6 +116,7 @@ public class ProductController extends BaseController {
     }
 
     @PostMapping
+    @Transactional
     public ResponseEntity<?> create(
             @RequestBody Map<String, Object> body,
             @RequestHeader(value = "Authorization", required = false) String auth,
@@ -141,6 +136,7 @@ public class ProductController extends BaseController {
     }
 
     @PutMapping("/{id}")
+    @Transactional
     public ResponseEntity<?> update(
             @PathVariable Long id,
             @RequestBody Map<String, Object> body,
@@ -157,6 +153,7 @@ public class ProductController extends BaseController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<?> delete(@PathVariable Long id) {
         try {
             productService.delete(id);
@@ -175,5 +172,17 @@ public class ProductController extends BaseController {
         if (body.get("costPrice") != null) p.setCostPrice(new BigDecimal(body.get("costPrice").toString()));
         if (body.get("stockQty") != null) p.setStockQty(new BigDecimal(body.get("stockQty").toString()));
         if (body.get("minStock") != null) p.setMinStock(new BigDecimal(body.get("minStock").toString()));
+
+        // ✅ Set Category by ID
+        if (body.get("categoryId") != null) {
+            Long catId = Long.valueOf(body.get("categoryId").toString());
+            categoryRepository.findById(catId).ifPresent(p::setCategory);
+        }
+
+        // ✅ Set Brand by ID
+        if (body.get("brandId") != null) {
+            Long brandId = Long.valueOf(body.get("brandId").toString());
+            brandRepository.findById(brandId).ifPresent(p::setBrand);
+        }
     }
 }
