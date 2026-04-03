@@ -33,6 +33,46 @@ public class ProductController extends BaseController {
         this.userRepository = userRepository;
     }
 
+    // ─── Helper: safely get string from map ──────────────────────────────────
+    private String str(Map<String, Object> body, String key) {
+        Object v = body.get(key);
+        return v != null ? v.toString().trim() : "";
+    }
+
+    // ─── Helper: safely get BigDecimal from map ───────────────────────────────
+    private BigDecimal decimal(Map<String, Object> body, String key) {
+        try {
+            Object v = body.get(key);
+            if (v == null || v.toString().trim().isEmpty())
+                return BigDecimal.ZERO;
+            return new BigDecimal(v.toString().trim());
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    // ─── Helper: safely get Long from map ────────────────────────────────────
+    private Long longVal(Map<String, Object> body, String key) {
+        try {
+            Object v = body.get(key);
+            if (v == null || v.toString().trim().isEmpty())
+                return null;
+            return Long.valueOf(v.toString().trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ─── Helper: safely get branch id from JWT ───────────────────────────────
+    private Long safeBranchId(String auth, Long branchId) {
+        try {
+            return getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
+        } catch (Exception e) {
+            return branchId; // fallback to header value if JWT fails
+        }
+    }
+
+    // ─── Map Product to response ──────────────────────────────────────────────
     private Map<String, Object> toMap(Product p) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("id", p.getId());
@@ -45,39 +85,64 @@ public class ProductController extends BaseController {
         map.put("minStock", p.getMinStock() != null ? p.getMinStock() : BigDecimal.ZERO);
         map.put("isActive", p.getIsActive() != null ? p.getIsActive() : true);
         map.put("imageUrl", p.getImageUrl() != null ? p.getImageUrl() : "");
-        try { if (p.getCategory() != null) map.put("category", Map.of("id", p.getCategory().getId(), "name", p.getCategory().getName())); } catch (Exception ignored) {}
-        try { if (p.getBrand() != null) map.put("brand", Map.of("id", p.getBrand().getId(), "name", p.getBrand().getName())); } catch (Exception ignored) {}
-        try { if (p.getUnit() != null) map.put("unit", Map.of("id", p.getUnit().getId(), "name", p.getUnit().getName())); } catch (Exception ignored) {}
-        try { if (p.getBranch() != null) map.put("branch", Map.of("id", p.getBranch().getId(), "name", p.getBranch().getName())); } catch (Exception ignored) {}
+        try {
+            if (p.getCategory() != null)
+                map.put("category", Map.of("id", p.getCategory().getId(), "name", p.getCategory().getName()));
+        } catch (Exception ignored) {
+        }
+        try {
+            if (p.getBrand() != null)
+                map.put("brand", Map.of("id", p.getBrand().getId(), "name", p.getBrand().getName()));
+        } catch (Exception ignored) {
+        }
+        try {
+            if (p.getUnit() != null)
+                map.put("unit", Map.of("id", p.getUnit().getId(), "name", p.getUnit().getName()));
+        } catch (Exception ignored) {
+        }
+        try {
+            if (p.getBranch() != null)
+                map.put("branch", Map.of("id", p.getBranch().getId(), "name", p.getBranch().getName()));
+        } catch (Exception ignored) {
+        }
         return map;
     }
 
+    // ─── GET ALL ──────────────────────────────────────────────────────────────
     @GetMapping
     @Transactional(readOnly = true)
     public ResponseEntity<?> getAll(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
-            Long effectiveBranchId = getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
+            Long effectiveBranchId = safeBranchId(auth, branchId);
             List<Product> products = effectiveBranchId != null
-                ? productService.getByBranch(effectiveBranchId)
-                : productService.getAllProducts();
+                    ? productService.getByBranch(effectiveBranchId)
+                    : productService.getAllProducts();
             List<Map<String, Object>> result = new ArrayList<>();
-            for (Product p : products) result.add(toMap(p));
+            for (Product p : products)
+                result.add(toMap(p));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"));
         }
     }
 
+    // ─── GET BY ID ────────────────────────────────────────────────────────────
     @GetMapping("/{id}")
     @Transactional(readOnly = true)
     public ResponseEntity<?> getById(@PathVariable Long id) {
-        try { return ResponseEntity.ok(toMap(productService.getById(id))); }
-        catch (Exception e) { return ResponseEntity.status(500).body(Map.of("error", e.getMessage())); }
+        try {
+            return ResponseEntity.ok(toMap(productService.getById(id)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"));
+        }
     }
 
+    // ─── SEARCH ───────────────────────────────────────────────────────────────
     @GetMapping("/search")
     @Transactional(readOnly = true)
     public ResponseEntity<?> search(
@@ -85,36 +150,42 @@ public class ProductController extends BaseController {
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
-            Long effectiveBranchId = getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
+            Long effectiveBranchId = safeBranchId(auth, branchId);
             List<Product> products = effectiveBranchId != null
-                ? productService.searchByBranch(effectiveBranchId, q)
-                : productService.searchProducts(q);
+                    ? productService.searchByBranch(effectiveBranchId, q)
+                    : productService.searchProducts(q);
             List<Map<String, Object>> result = new ArrayList<>();
-            for (Product p : products) result.add(toMap(p));
+            for (Product p : products)
+                result.add(toMap(p));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"));
         }
     }
 
+    // ─── LOW STOCK ────────────────────────────────────────────────────────────
     @GetMapping("/low-stock")
     @Transactional(readOnly = true)
     public ResponseEntity<?> lowStock(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
-            Long effectiveBranchId = getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
+            Long effectiveBranchId = safeBranchId(auth, branchId);
             List<Product> products = effectiveBranchId != null
-                ? productService.getLowStockByBranch(effectiveBranchId)
-                : productService.getLowStockProducts();
+                    ? productService.getLowStockByBranch(effectiveBranchId)
+                    : productService.getLowStockProducts();
             List<Map<String, Object>> result = new ArrayList<>();
-            for (Product p : products) result.add(toMap(p));
+            for (Product p : products)
+                result.add(toMap(p));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"));
         }
     }
 
+    // ─── CREATE ───────────────────────────────────────────────────────────────
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(
@@ -122,19 +193,43 @@ public class ProductController extends BaseController {
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
-            Product product = new Product();
-            setProductFields(product, body);
-            Long effectiveBranchId = getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
-            if (effectiveBranchId != null) {
-                branchRepository.findById(effectiveBranchId).ifPresent(product::setBranch);
+            // Validate required fields
+            String name = str(body, "name");
+            if (name.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Product name is required"));
             }
-            return ResponseEntity.ok(toMap(productService.save(product)));
+
+            Product product = new Product();
+            applyFields(product, body);
+
+            // Set branch safely
+            try {
+                Long effectiveBranchId = safeBranchId(auth, branchId);
+                if (effectiveBranchId != null) {
+                    branchRepository.findById(effectiveBranchId).ifPresent(product::setBranch);
+                }
+            } catch (Exception ignored) {
+                // Branch not critical — continue without it
+            }
+
+            Product saved = productService.save(product);
+            return ResponseEntity.ok(toMap(saved));
+
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";
+            if (msg.contains("Duplicate entry") && msg.contains("code")) {
+                return ResponseEntity.status(400)
+                        .body(Map.of("error", "Product code already exists. Use a different code or leave it empty."));
+            }
+            if (msg.contains("Duplicate entry")) {
+                return ResponseEntity.status(400).body(Map.of("error", "Duplicate entry: " + msg));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
 
+    // ─── UPDATE ───────────────────────────────────────────────────────────────
     @PutMapping("/{id}")
     @Transactional
     public ResponseEntity<?> update(
@@ -143,15 +238,33 @@ public class ProductController extends BaseController {
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
+            // Validate required fields
+            String name = str(body, "name");
+            if (name.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Product name is required"));
+            }
+
             Product existing = productService.getById(id);
-            setProductFields(existing, body);
-            return ResponseEntity.ok(toMap(productService.save(existing)));
+            applyFields(existing, body);
+
+            Product saved = productService.save(existing);
+            return ResponseEntity.ok(toMap(saved));
+
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";
+            if (msg.contains("Duplicate entry") && msg.contains("code")) {
+                return ResponseEntity.status(400)
+                        .body(Map.of("error", "Product code already exists. Use a different code or leave it empty."));
+            }
+            if (msg.contains("Duplicate entry")) {
+                return ResponseEntity.status(400).body(Map.of("error", "Duplicate entry: " + msg));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
 
+    // ─── DELETE ───────────────────────────────────────────────────────────────
     @DeleteMapping("/{id}")
     @Transactional
     public ResponseEntity<?> delete(@PathVariable Long id) {
@@ -159,29 +272,55 @@ public class ProductController extends BaseController {
             productService.delete(id);
             return ResponseEntity.ok(Map.of("message", "Deleted"));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"));
         }
     }
 
-    private void setProductFields(Product p, Map<String, Object> body) {
-        if (body.get("name") != null) p.setName((String) body.get("name"));
-        if (body.get("code") != null) p.setCode((String) body.get("code"));
-        if (body.get("description") != null) p.setDescription((String) body.get("description"));
-        if (body.get("imageUrl") != null) p.setImageUrl((String) body.get("imageUrl"));
-        if (body.get("salePrice") != null) p.setSalePrice(new BigDecimal(body.get("salePrice").toString()));
-        if (body.get("costPrice") != null) p.setCostPrice(new BigDecimal(body.get("costPrice").toString()));
-        if (body.get("stockQty") != null) p.setStockQty(new BigDecimal(body.get("stockQty").toString()));
-        if (body.get("minStock") != null) p.setMinStock(new BigDecimal(body.get("minStock").toString()));
+    // ─── Apply fields to product (safe, null-checked) ─────────────────────────
+    private void applyFields(Product p, Map<String, Object> body) {
 
-        // ✅ Set Category by ID
-        if (body.get("categoryId") != null) {
-            Long catId = Long.valueOf(body.get("categoryId").toString());
+        // Name
+        String name = str(body, "name");
+        if (!name.isEmpty())
+            p.setName(name);
+
+        // Code: store null instead of "" to avoid UNIQUE constraint violation
+        if (body.containsKey("code")) {
+            String code = str(body, "code");
+            p.setCode(code.isEmpty() ? null : code);
+        }
+
+        // Description
+        if (body.containsKey("description")) {
+            p.setDescription(str(body, "description"));
+        }
+
+        // Image URL (TEXT column — safe for Base64)
+        if (body.containsKey("imageUrl")) {
+            String img = str(body, "imageUrl");
+            p.setImageUrl(img.isEmpty() ? null : img);
+        }
+
+        // Prices & stock
+        if (body.containsKey("salePrice"))
+            p.setSalePrice(decimal(body, "salePrice"));
+        if (body.containsKey("costPrice"))
+            p.setCostPrice(decimal(body, "costPrice"));
+        if (body.containsKey("stockQty"))
+            p.setStockQty(decimal(body, "stockQty"));
+        if (body.containsKey("minStock"))
+            p.setMinStock(decimal(body, "minStock"));
+
+        // Category
+        Long catId = longVal(body, "categoryId");
+        if (catId != null) {
             categoryRepository.findById(catId).ifPresent(p::setCategory);
         }
 
-        // ✅ Set Brand by ID
-        if (body.get("brandId") != null) {
-            Long brandId = Long.valueOf(body.get("brandId").toString());
+        // Brand
+        Long brandId = longVal(body, "brandId");
+        if (brandId != null) {
             brandRepository.findById(brandId).ifPresent(p::setBrand);
         }
     }
