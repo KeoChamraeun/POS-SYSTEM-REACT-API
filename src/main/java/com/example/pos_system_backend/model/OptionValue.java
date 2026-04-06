@@ -18,6 +18,12 @@ public class OptionValue {
     @JsonIgnoreProperties({ "values", "hibernateLazyInitializer" })
     private OptionGroup optionGroup;
 
+    // ── NEW ──
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    @JsonIgnoreProperties({ "hibernateLazyInitializer" })
+    private Branch branch;
+
     @Column(name = "name", nullable = false, length = 100)
     private String name;
 
@@ -41,11 +47,9 @@ public class OptionValue {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // ── Constructors ──────────────────────────────────────────
     public OptionValue() {
     }
 
-    // ── Getters & Setters ─────────────────────────────────────
     public Long getId() {
         return id;
     }
@@ -61,6 +65,14 @@ public class OptionValue {
     public void setOptionGroup(OptionGroup og) {
         this.optionGroup = og;
     }
+
+    public Branch getBranch() {
+        return branch;
+    } // NEW
+
+    public void setBranch(Branch v) {
+        this.branch = v;
+    } // NEW
 
     public String getName() {
         return name;

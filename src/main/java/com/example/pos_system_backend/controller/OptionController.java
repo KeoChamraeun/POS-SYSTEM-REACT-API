@@ -19,18 +19,21 @@ public class OptionController {
     private final ProductOptionGroupRepository productOptionGroupRepo;
     private final SaleItemOptionRepository saleItemOptionRepo;
     private final ProductRepository productRepo;
+    private final BranchRepository branchRepo;
 
     public OptionController(
             OptionGroupRepository optionGroupRepo,
             OptionValueRepository optionValueRepo,
             ProductOptionGroupRepository productOptionGroupRepo,
             SaleItemOptionRepository saleItemOptionRepo,
-            ProductRepository productRepo) {
+            ProductRepository productRepo,
+            BranchRepository branchRepo) {
         this.optionGroupRepo = optionGroupRepo;
         this.optionValueRepo = optionValueRepo;
         this.productOptionGroupRepo = productOptionGroupRepo;
         this.saleItemOptionRepo = saleItemOptionRepo;
         this.productRepo = productRepo;
+        this.branchRepo = branchRepo;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -66,6 +69,15 @@ public class OptionController {
             if (v == null || v.toString().trim().isEmpty())
                 return null;
             return new BigDecimal(v.toString().trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Long parseBranchId(Map<String, Object> body) {
+        try {
+            Object v = body.get("branchId");
+            return v == null ? null : Long.valueOf(v.toString());
         } catch (Exception e) {
             return null;
         }
@@ -114,11 +126,20 @@ public class OptionController {
     // OPTION GROUPS — CRUD
     // ══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * GET /api/options/groups?branchId=1
+     * → returns groups for that branch + shared groups (branch IS NULL)
+     *
+     * GET /api/options/groups (no param — admin/roleId=1)
+     * → returns ALL active groups across all branches
+     */
     @GetMapping("/groups")
     @Transactional(readOnly = true)
-    public ResponseEntity<?> listGroups() {
+    public ResponseEntity<?> listGroups(@RequestParam(required = false) Long branchId) {
         try {
-            List<OptionGroup> groups = optionGroupRepo.findByIsActiveTrueOrderBySortOrderAsc();
+            List<OptionGroup> groups = branchId != null
+                    ? optionGroupRepo.findActiveByBranchIdOrShared(branchId)
+                    : optionGroupRepo.findByIsActiveTrueOrderBySortOrderAsc();
             List<Map<String, Object>> result = new ArrayList<>();
             for (OptionGroup g : groups)
                 result.add(groupToMap(g));
@@ -129,6 +150,14 @@ public class OptionController {
         }
     }
 
+    /**
+     * POST /api/options/groups
+     *
+     * branchId is OPTIONAL:
+     * - Provided (branch staff) → group is assigned to that branch
+     * - Omitted (admin roleId=1) → group is shared (branch = null),
+     * visible to all branches via findActiveByBranchIdOrShared
+     */
     @PostMapping("/groups")
     @Transactional
     public ResponseEntity<?> createGroup(@RequestBody Map<String, Object> body) {
@@ -145,8 +174,17 @@ public class OptionController {
             g.setSortOrder(intVal(body, "sortOrder", 0));
             g.setIsActive(true);
 
-            OptionGroup saved = optionGroupRepo.save(g);
-            return ResponseEntity.ok(groupToMap(saved));
+            // branchId is optional — admin may omit it to create a shared group
+            Long branchId = parseBranchId(body);
+            if (branchId != null) {
+                Branch branch = branchRepo.findById(branchId).orElse(null);
+                if (branch == null)
+                    return ResponseEntity.badRequest().body(Map.of("error", "Branch not found: " + branchId));
+                g.setBranch(branch);
+            }
+            // if branchId == null → branch stays null → group is shared across all branches
+
+            return ResponseEntity.ok(groupToMap(optionGroupRepo.save(g)));
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.status(500).body(Map.of("error", "Failed to create option group"));
@@ -175,8 +213,19 @@ public class OptionController {
             if (body.containsKey("isActive"))
                 g.setIsActive(bool(body, "isActive", g.getIsActive()));
 
-            OptionGroup saved = optionGroupRepo.save(g);
-            return ResponseEntity.ok(groupToMap(saved));
+            // Allow re-assigning branch on update
+            if (body.containsKey("branchId")) {
+                Long branchId = parseBranchId(body);
+                if (branchId != null) {
+                    Branch branch = branchRepo.findById(branchId).orElse(null);
+                    if (branch == null)
+                        return ResponseEntity.badRequest().body(Map.of("error", "Branch not found: " + branchId));
+                    g.setBranch(branch);
+                }
+                // if branchId key is present but null → keep existing branch unchanged
+            }
+
+            return ResponseEntity.ok(groupToMap(optionGroupRepo.save(g)));
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.status(500).body(Map.of("error", "Failed to update option group"));
@@ -237,9 +286,9 @@ public class OptionController {
             v.setPriceOverride(decimal(body, "priceOverride"));
             v.setSortOrder(intVal(body, "sortOrder", 0));
             v.setIsActive(true);
+            v.setBranch(group.getBranch()); // inherit branch from parent group (may be null for shared)
 
-            OptionValue saved = optionValueRepo.save(v);
-            return ResponseEntity.ok(valueToMap(saved));
+            return ResponseEntity.ok(valueToMap(optionValueRepo.save(v)));
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.status(500).body(Map.of("error", "Failed to create option value"));
@@ -264,8 +313,7 @@ public class OptionController {
             if (body.containsKey("isActive"))
                 v.setIsActive(bool(body, "isActive", v.getIsActive()));
 
-            OptionValue saved = optionValueRepo.save(v);
-            return ResponseEntity.ok(valueToMap(saved));
+            return ResponseEntity.ok(valueToMap(optionValueRepo.save(v)));
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.status(500).body(Map.of("error", "Failed to update option value"));
@@ -315,10 +363,6 @@ public class OptionController {
     public ResponseEntity<?> assignOptionToProduct(@PathVariable Long pid,
             @RequestBody Map<String, Object> body) {
         try {
-            System.out.println("=== ASSIGN OPTION TO PRODUCT ===");
-            System.out.println("Product ID: " + pid);
-            System.out.println("Request Body: " + body);
-
             Object gidRaw = body.get("optionGroupId");
             if (gidRaw == null)
                 return ResponseEntity.badRequest().body(Map.of("error", "optionGroupId is required"));
@@ -332,31 +376,25 @@ public class OptionController {
 
             Product product = productRepo.findById(pid).orElse(null);
             if (product == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Product not found with id: " + pid));
+                return ResponseEntity.badRequest().body(Map.of("error", "Product not found: " + pid));
 
             OptionGroup group = optionGroupRepo.findById(groupId).orElse(null);
             if (group == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Option group not found with id: " + groupId));
+                return ResponseEntity.badRequest().body(Map.of("error", "Option group not found: " + groupId));
 
             if (productOptionGroupRepo.existsByProductIdAndOptionGroupId(pid, groupId))
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Option group already assigned to this product"));
 
             Integer sortOrder = intVal(body, "sortOrder", 0);
-
-            ProductOptionGroup pog = new ProductOptionGroup(product, group, sortOrder);
-            productOptionGroupRepo.save(pog);
-
-            System.out.println("✅ SUCCESS: Assigned option group " + groupId + " to product " + pid);
+            productOptionGroupRepo.save(new ProductOptionGroup(product, group, sortOrder));
 
             return ResponseEntity.ok(Map.of(
                     "message", "Option group assigned successfully",
                     "productId", pid,
                     "optionGroupId", groupId,
                     "sortOrder", sortOrder));
-
         } catch (Exception e) {
-            System.err.println("🔥 ERROR in assignOptionToProduct:");
             e.printStackTrace();
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", "Failed to assign option group: " + e.getMessage()));
@@ -365,26 +403,14 @@ public class OptionController {
 
     @DeleteMapping("/product/{pid}/{gid}")
     @Transactional
-    public ResponseEntity<?> removeOptionFromProduct(@PathVariable Long pid,
-            @PathVariable Long gid) {
+    public ResponseEntity<?> removeOptionFromProduct(@PathVariable Long pid, @PathVariable Long gid) {
         try {
-            System.out.println("=== REMOVE OPTION FROM PRODUCT ===");
-            System.out.println("Product ID: " + pid + ", OptionGroup ID: " + gid);
-
-            // ✅ FIXED: use renamed method
-            Optional<ProductOptionGroup> existing = productOptionGroupRepo
-                    .findByProductIdAndOptionGroupId(pid, gid);
-            if (existing.isEmpty()) {
+            Optional<ProductOptionGroup> existing = productOptionGroupRepo.findByProductIdAndOptionGroupId(pid, gid);
+            if (existing.isEmpty())
                 return ResponseEntity.badRequest().body(Map.of("error", "Option group mapping not found"));
-            }
-
             productOptionGroupRepo.delete(existing.get());
-            System.out.println("✅ SUCCESS: Removed option group " + gid + " from product " + pid);
-
             return ResponseEntity.ok(Map.of("message", "Option group removed successfully"));
-
         } catch (Exception e) {
-            System.err.println("🔥 ERROR in removeOptionFromProduct:");
             e.printStackTrace();
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", "Failed to remove option group: " + e.getMessage()));
@@ -405,7 +431,6 @@ public class OptionController {
                 try {
                     Long groupId = Long.valueOf(sel.get("optionGroupId").toString());
                     Long valueId = Long.valueOf(sel.get("optionValueId").toString());
-
                     OptionGroup group = optionGroupRepo.findById(groupId).orElse(null);
                     OptionValue value = optionValueRepo.findById(valueId).orElse(null);
                     if (group == null || value == null)
@@ -414,7 +439,6 @@ public class OptionController {
                     BigDecimal snapshot = value.getPriceOverride() != null
                             ? value.getPriceOverride()
                             : BigDecimal.ZERO;
-
                     SaleItemOption sio = new SaleItemOption(saleItemId, group, value, snapshot);
                     SaleItemOption result = saleItemOptionRepo.save(sio);
 

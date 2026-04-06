@@ -4,6 +4,7 @@ import com.example.pos_system_backend.model.*;
 import com.example.pos_system_backend.repository.*;
 import com.example.pos_system_backend.security.JwtUtils;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -17,6 +18,7 @@ public class UserController extends BaseController {
     private final RoleRepository roleRepository;
     private final BranchRepository branchRepository;
     private final JwtUtils jwtUtils;
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserController(UserRepository userRepository,
             RoleRepository roleRepository,
@@ -55,6 +57,11 @@ public class UserController extends BaseController {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ✅ Helper: check if a string is already a bcrypt hash
+    private boolean isBcryptHash(String value) {
+        return value != null && value.startsWith("$2");
     }
 
     // ✅ GET current logged-in user info
@@ -106,7 +113,7 @@ public class UserController extends BaseController {
         return ResponseEntity.ok(toMap(userRepository.findById(id).orElseThrow()));
     }
 
-    // ✅ CREATE user — validates role belongs to same branch (admin bypasses check)
+    // ✅ CREATE user — hash password before saving
     @PostMapping
     public ResponseEntity<?> create(
             @RequestBody Map<String, Object> body,
@@ -120,7 +127,16 @@ public class UserController extends BaseController {
 
         User user = new User();
         user.setUsername(username);
-        user.setPassword((String) body.get("password"));
+
+        // ✅ Hash password — if frontend already hashed it, store as-is (it's valid
+        // bcrypt)
+        String rawPassword = (String) body.get("password");
+        if (rawPassword != null && !rawPassword.isEmpty()) {
+            user.setPassword(isBcryptHash(rawPassword)
+                    ? rawPassword
+                    : passwordEncoder.encode(rawPassword));
+        }
+
         user.setFullName((String) body.get("fullName"));
         user.setEmail((String) body.get("email"));
         user.setIsActive(true);
@@ -142,7 +158,6 @@ public class UserController extends BaseController {
                 return ResponseEntity.badRequest().body(Map.of("message", "Role not found"));
             }
 
-            // ✅ Non-admin: role must belong to the same branch as the new user
             if (!isAdmin(auth) && userBranchId != null) {
                 if (role.getBranch() == null || !role.getBranch().getId().equals(userBranchId)) {
                     return ResponseEntity.status(403)
@@ -155,8 +170,7 @@ public class UserController extends BaseController {
         return ResponseEntity.ok(toMap(userRepository.save(user)));
     }
 
-    // ✅ UPDATE user — validates role belongs to user's branch (admin bypasses
-    // check)
+    // ✅ UPDATE user — hash new password before saving
     @PutMapping("/{id}")
     public ResponseEntity<?> update(
             @PathVariable Long id,
@@ -170,9 +184,15 @@ public class UserController extends BaseController {
             user.setFullName((String) body.get("fullName"));
         if (body.get("email") != null)
             user.setEmail((String) body.get("email"));
+
+        // ✅ Hash password if provided
         if (body.get("password") != null && !((String) body.get("password")).isEmpty()) {
-            user.setPassword((String) body.get("password"));
+            String rawPassword = (String) body.get("password");
+            user.setPassword(isBcryptHash(rawPassword)
+                    ? rawPassword
+                    : passwordEncoder.encode(rawPassword));
         }
+
         if (body.get("isActive") != null)
             user.setIsActive((Boolean) body.get("isActive"));
 
@@ -190,7 +210,6 @@ public class UserController extends BaseController {
                 return ResponseEntity.badRequest().body(Map.of("message", "Role not found"));
             }
 
-            // ✅ Non-admin: role must belong to the user's branch
             Long effectiveBranchId = user.getBranch() != null
                     ? user.getBranch().getId()
                     : getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
