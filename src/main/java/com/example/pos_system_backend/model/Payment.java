@@ -17,7 +17,6 @@ public class Payment {
     @JoinColumn(name = "sale_id")
     private Sale sale;
 
-    // ==================== SHIFT RELATIONSHIP (NEW) ====================
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shift_id")
     @JsonIgnoreProperties({ "hibernateLazyInitializer" })
@@ -41,13 +40,11 @@ public class Payment {
     private LocalDateTime paymentDate = LocalDateTime.now();
 
     public enum PaymentMethod {
-        CASH, CARD, QR, CREDIT
+        CASH, CARD, QR, CREDIT, KHQR // 👈 KHQR added here
     }
 
     public Payment() {
     }
-
-    // ==================== GETTERS & SETTERS ====================
 
     public Long getId() {
         return id;

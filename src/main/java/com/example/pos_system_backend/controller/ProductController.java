@@ -19,16 +19,19 @@ public class ProductController extends BaseController {
     private final BranchRepository branchRepository;
     private final CategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
+    private final StockAdjustmentRepository stockAdjustmentRepository;
     private final JwtUtils jwtUtils;
     private final UserRepository userRepository;
 
     public ProductController(ProductService productService, BranchRepository branchRepository,
             CategoryRepository categoryRepository, BrandRepository brandRepository,
+            StockAdjustmentRepository stockAdjustmentRepository,
             JwtUtils jwtUtils, UserRepository userRepository) {
         this.productService = productService;
         this.branchRepository = branchRepository;
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
+        this.stockAdjustmentRepository = stockAdjustmentRepository;
         this.jwtUtils = jwtUtils;
         this.userRepository = userRepository;
     }
@@ -68,8 +71,20 @@ public class ProductController extends BaseController {
         try {
             return getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
         } catch (Exception e) {
-            return branchId; // fallback to header value if JWT fails
+            return branchId;
         }
+    }
+
+    // ─── Helper: resolve current user from JWT ───────────────────────────────
+    private User resolveUser(String auth) {
+        if (auth != null && auth.startsWith("Bearer ")) {
+            try {
+                String username = jwtUtils.extractUsername(auth.substring(7));
+                return userRepository.findByUsername(username).orElse(null);
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
     }
 
     // ─── Map Product to response ──────────────────────────────────────────────
@@ -193,7 +208,6 @@ public class ProductController extends BaseController {
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
-            // Validate required fields
             String name = str(body, "name");
             if (name.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Product name is required"));
@@ -202,17 +216,32 @@ public class ProductController extends BaseController {
             Product product = new Product();
             applyFields(product, body);
 
-            // Set branch safely
             try {
                 Long effectiveBranchId = safeBranchId(auth, branchId);
                 if (effectiveBranchId != null) {
                     branchRepository.findById(effectiveBranchId).ifPresent(product::setBranch);
                 }
             } catch (Exception ignored) {
-                // Branch not critical — continue without it
             }
 
             Product saved = productService.save(product);
+
+            // ── Create initial stock adjustment if stockQty > 0 ──
+            BigDecimal stockQty = saved.getStockQty() != null ? saved.getStockQty() : BigDecimal.ZERO;
+            if (stockQty.compareTo(BigDecimal.ZERO) > 0) {
+                StockAdjustment adj = new StockAdjustment();
+                adj.setProduct(saved);
+                adj.setQuantity(stockQty);
+                adj.setAdjustmentType(StockAdjustment.AdjustmentType.ADD);
+                adj.setReason("Initial stock for new product: " + saved.getName());
+                if (saved.getBranch() != null)
+                    adj.setBranch(saved.getBranch());
+                User currentUser = resolveUser(auth);
+                if (currentUser != null)
+                    adj.setUser(currentUser);
+                stockAdjustmentRepository.save(adj);
+            }
+
             return ResponseEntity.ok(toMap(saved));
 
         } catch (Exception e) {
@@ -238,7 +267,6 @@ public class ProductController extends BaseController {
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
-            // Validate required fields
             String name = str(body, "name");
             if (name.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Product name is required"));
@@ -277,32 +305,26 @@ public class ProductController extends BaseController {
         }
     }
 
-    // ─── Apply fields to product (safe, null-checked) ─────────────────────────
+    // ─── Apply fields to product ──────────────────────────────────────────────
     private void applyFields(Product p, Map<String, Object> body) {
-
-        // Name
         String name = str(body, "name");
         if (!name.isEmpty())
             p.setName(name);
 
-        // Code: store null instead of "" to avoid UNIQUE constraint violation
         if (body.containsKey("code")) {
             String code = str(body, "code");
             p.setCode(code.isEmpty() ? null : code);
         }
 
-        // Description
         if (body.containsKey("description")) {
             p.setDescription(str(body, "description"));
         }
 
-        // Image URL (TEXT column — safe for Base64)
         if (body.containsKey("imageUrl")) {
             String img = str(body, "imageUrl");
             p.setImageUrl(img.isEmpty() ? null : img);
         }
 
-        // Prices & stock
         if (body.containsKey("salePrice"))
             p.setSalePrice(decimal(body, "salePrice"));
         if (body.containsKey("costPrice"))
@@ -312,13 +334,11 @@ public class ProductController extends BaseController {
         if (body.containsKey("minStock"))
             p.setMinStock(decimal(body, "minStock"));
 
-        // Category
         Long catId = longVal(body, "categoryId");
         if (catId != null) {
             categoryRepository.findById(catId).ifPresent(p::setCategory);
         }
 
-        // Brand
         Long brandId = longVal(body, "brandId");
         if (brandId != null) {
             brandRepository.findById(brandId).ifPresent(p::setBrand);

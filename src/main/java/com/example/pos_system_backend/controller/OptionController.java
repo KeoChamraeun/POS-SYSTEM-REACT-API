@@ -126,13 +126,6 @@ public class OptionController {
     // OPTION GROUPS — CRUD
     // ══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * GET /api/options/groups?branchId=1
-     * → returns groups for that branch + shared groups (branch IS NULL)
-     *
-     * GET /api/options/groups (no param — admin/roleId=1)
-     * → returns ALL active groups across all branches
-     */
     @GetMapping("/groups")
     @Transactional(readOnly = true)
     public ResponseEntity<?> listGroups(@RequestParam(required = false) Long branchId) {
@@ -183,7 +176,6 @@ public class OptionController {
                 g.setBranch(branch);
             }
             // if branchId == null → branch stays null → group is shared across all branches
-
             return ResponseEntity.ok(groupToMap(optionGroupRepo.save(g)));
         } catch (Exception e) {
             e.printStackTrace();

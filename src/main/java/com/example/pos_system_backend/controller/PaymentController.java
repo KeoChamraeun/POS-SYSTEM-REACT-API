@@ -39,16 +39,17 @@ public class PaymentController extends BaseController {
         try {
             if (p.getSale() != null) {
                 map.put("sale", Map.of(
-                    "id", p.getSale().getId(),
-                    "invoiceNo", p.getSale().getInvoiceNo() != null ? p.getSale().getInvoiceNo() : ""
-                ));
+                        "id", p.getSale().getId(),
+                        "invoiceNo", p.getSale().getInvoiceNo() != null ? p.getSale().getInvoiceNo() : ""));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         try {
             if (p.getBranch() != null) {
                 map.put("branch", Map.of("id", p.getBranch().getId(), "name", p.getBranch().getName()));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         return map;
     }
 
@@ -60,10 +61,11 @@ public class PaymentController extends BaseController {
         try {
             Long effectiveBranchId = getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
             List<Payment> payments = effectiveBranchId != null
-                ? paymentRepository.findByBranchIdOrderByPaymentDateDesc(effectiveBranchId)
-                : paymentRepository.findAllWithDetails();
+                    ? paymentRepository.findByBranchIdOrderByPaymentDateDesc(effectiveBranchId)
+                    : paymentRepository.findAllWithDetails();
             List<Map<String, Object>> result = new ArrayList<>();
-            for (Payment p : payments) result.add(toMap(p));
+            for (Payment p : payments)
+                result.add(toMap(p));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             e.printStackTrace();
@@ -76,7 +78,7 @@ public class PaymentController extends BaseController {
     public ResponseEntity<?> getById(@PathVariable Long id) {
         try {
             Payment p = paymentRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Payment not found"));
+                    .orElseThrow(() -> new RuntimeException("Payment not found"));
             return ResponseEntity.ok(toMap(p));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
@@ -93,25 +95,25 @@ public class PaymentController extends BaseController {
             Payment payment = new Payment();
             payment.setAmount(new BigDecimal(body.get("amount").toString()));
             payment.setPaymentMethod(Payment.PaymentMethod.valueOf(
-                body.getOrDefault("paymentMethod", "CASH").toString()));
+                    body.getOrDefault("paymentMethod", "CASH").toString()));
             payment.setReferenceNo((String) body.get("referenceNo"));
 
             if (body.get("saleId") != null) {
                 saleRepository.findById(Long.valueOf(body.get("saleId").toString()))
-                    .ifPresent(payment::setSale);
+                        .ifPresent(payment::setSale);
             }
 
             Long userBranchId = body.get("branchId") != null
-                ? Long.valueOf(body.get("branchId").toString())
-                : getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
+                    ? Long.valueOf(body.get("branchId").toString())
+                    : getEffectiveBranchId(auth, branchId, jwtUtils, userRepository);
             if (userBranchId != null) {
                 branchRepository.findById(userBranchId).ifPresent(payment::setBranch);
             }
 
             Payment saved = paymentRepository.save(payment);
             Payment reloaded = paymentRepository.findAllWithDetails().stream()
-                .filter(p -> p.getId().equals(saved.getId()))
-                .findFirst().orElse(saved);
+                    .filter(p -> p.getId().equals(saved.getId()))
+                    .findFirst().orElse(saved);
             return ResponseEntity.ok(toMap(reloaded));
         } catch (Exception e) {
             e.printStackTrace();
@@ -128,7 +130,7 @@ public class PaymentController extends BaseController {
             @RequestHeader(value = "X-Branch-Id", required = false) Long branchId) {
         try {
             Payment payment = paymentRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Payment not found"));
+                    .orElseThrow(() -> new RuntimeException("Payment not found"));
 
             if (body.get("amount") != null)
                 payment.setAmount(new BigDecimal(body.get("amount").toString()));
@@ -138,17 +140,17 @@ public class PaymentController extends BaseController {
                 payment.setReferenceNo((String) body.get("referenceNo"));
             if (body.get("saleId") != null) {
                 saleRepository.findById(Long.valueOf(body.get("saleId").toString()))
-                    .ifPresent(payment::setSale);
+                        .ifPresent(payment::setSale);
             }
             if (body.get("branchId") != null) {
                 branchRepository.findById(Long.valueOf(body.get("branchId").toString()))
-                    .ifPresent(payment::setBranch);
+                        .ifPresent(payment::setBranch);
             }
 
             paymentRepository.save(payment);
             Payment reloaded = paymentRepository.findAllWithDetails().stream()
-                .filter(p -> p.getId().equals(id))
-                .findFirst().orElse(payment);
+                    .filter(p -> p.getId().equals(id))
+                    .findFirst().orElse(payment);
             return ResponseEntity.ok(toMap(reloaded));
         } catch (Exception e) {
             e.printStackTrace();

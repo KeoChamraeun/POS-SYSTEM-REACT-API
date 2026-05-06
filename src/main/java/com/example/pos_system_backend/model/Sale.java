@@ -73,7 +73,7 @@ public class Sale {
     private List<SaleItem> items;
 
     public enum PaymentMethod {
-        CASH, CARD, QR, CREDIT
+        CASH, CARD, QR, CREDIT, KHQR
     }
 
     public enum SaleStatus {
